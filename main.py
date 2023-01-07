@@ -22,13 +22,14 @@ class Estimator:
 
     def predict_single(self, item):
         df = pd.DataFrame(columns=self._inner_model.columns)
-        df = df.append(json.load(StringIO(item.json())), ignore_index=True)
+        df = df.append(item.dict(), ignore_index=True)
         prediction, = self._inner_model.predict(df)
         return int(prediction)
 
     def predict_multiple(self, items):
         df = pd.DataFrame(columns=self._inner_model.columns)
-        df.append(json.load(StringIO(items.json())), ignore_index=True)
+        items_as_dict = [it.dict() for it in items]
+        df = df.append(items_as_dict, ignore_index=True)
         prediction = self._inner_model.predict(df)
         return [int(p) for p in prediction]
 
@@ -66,7 +67,7 @@ class Prediction(BaseModel):
 
 
 class Predictions(BaseModel):
-    objects: List[Prediction]
+    predictions: List[Prediction]
 
 
 @app.post("/predict_item")
@@ -85,7 +86,7 @@ def predict_items(items: List[Item], estimator: Estimator = Depends(get_estimato
     """
     rlist = estimator.predict_multiple(items)
     predictions = [Prediction(selling_price=val) for val in rlist]
-    return Predictions(objects=predictions)
+    return Predictions(predictions=predictions)
 
 
 @app.post("/predict_items_csv", response_class=StreamingResponse)
@@ -95,9 +96,12 @@ def predict_items_csv(csv: UploadFile, estimator: Estimator = Depends(get_estima
     мы предполагаем, что файл правильного формата и со всеми нужными колонками,
     selling_price при этом в запросе отсутствует
     """
-    df = pd.read_csv(csv)
+    df = pd.read_csv(csv.file)
     prediction = estimator.predict_df(df)
-    df.insert(loc=2, column="selling_price", value=prediction)
+    try:
+        df.insert(loc=2, column="selling_price", value=prediction)
+    except ValueError:
+        df["selling_price"] = prediction
     response_buf = StringIO()
     df.to_csv(response_buf, index=False)
     # формирование response взято отсюда: https://stackoverflow.com/a/69799463
